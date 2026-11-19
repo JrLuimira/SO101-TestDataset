@@ -1,0 +1,169 @@
+0. PROGRAMA DEL FEETCH:  /usr/bin/FT_SCServo_Debug_Qt
+
+1. (lerobot) luimira@Luigi:~Desktop/robots/lerobot$ 
+2. source .venv/bin/activate
+
+
+3.   
+   
+lerobot-calibrate \
+  --robot.type=so101_follower \
+  --robot.port=/dev/ttyACM3 \
+  --robot.id=follower_3
+    
+   
+
+4.
+
+lerobot-calibrate --teleop.type=so101_leader --teleop.port=/dev/ttyACM2 --teleop.id=leader_3
+
+
+5. 
+lerobot-teleoperate \
+  --robot.type=so101_follower \
+  --robot.port=/dev/ttyACM1 \
+  --robot.id=follower_3 \
+  --teleop.type=so101_leader \
+  --teleop.port=/dev/ttyACM2 \
+  --teleop.id=leader_3 \
+  --display_data=true
+  
+  
+6. PROBAR LOS IDS DEL FOLLOWER:
+
+python - <<'PY'
+import time
+from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
+
+robot = SO101Follower(SO101FollowerConfig(port="/dev/ttyACM0", id="follower_2"))
+bus = robot.bus
+bus.connect()
+try:
+    print("Asignación configurada:")
+    for nombre, motor in bus.motors.items():
+        print(f"  ID {motor.id}: {nombre}")
+
+    activos = [
+        nombre for nombre in bus.motors
+        if bus.read("Torque_Enable", nombre, normalize=False) != 0
+    ]
+    if activos:
+        raise SystemExit(f"Torque activo en {activos}. Detén la prueba sin moverlos a mano.")
+
+    print("\nDeja el brazo quieto. Tomando posición de referencia...")
+    time.sleep(2)
+    inicio = bus.sync_read("Present_Position", normalize=False)
+    print("Mueve una articulación por vez y devuélvela al inicio. Ctrl+C para salir.")
+
+    while True:
+        actual = bus.sync_read("Present_Position", normalize=False)
+        cambios = []
+        for nombre, valor in actual.items():
+            delta = valor - inicio[nombre]
+            if abs(delta) >= 25:
+                cambios.append(f"ID {bus.motors[nombre].id} {nombre}: {delta:+d}")
+        print(" | ".join(cambios) if cambios else "En posición de referencia", flush=True)
+        time.sleep(0.4)
+except KeyboardInterrupt:
+    pass
+finally:
+    bus.disconnect(False)
+PY
+
+7. PROBAR LOS IDS DE LEADER:
+python - <<'PY'
+import time
+from lerobot.teleoperators.so_leader import SO101Leader, SO101LeaderConfig
+
+leader = SO101Leader(SO101LeaderConfig(port="/dev/ttyACM2", id="leader_1"))
+bus = leader.bus
+bus.connect()
+
+try:
+    print("Asignación configurada del leader:")
+    for nombre, motor in bus.motors.items():
+        print(f"  ID {motor.id}: {nombre}")
+
+    activos = [
+        nombre for nombre in bus.motors
+        if bus.read("Torque_Enable", nombre, normalize=False) != 0
+    ]
+    if activos:
+        raise SystemExit(f"Torque activo en {activos}. Detén la prueba sin moverlos a mano.")
+
+    print("\nDeja el leader quieto. Tomando posición de referencia...", flush=True)
+    time.sleep(2)
+    inicio = bus.sync_read("Present_Position", normalize=False)
+    print("Mueve una articulación por vez y devuélvela al inicio. Ctrl+C para salir.")
+
+    while True:
+        actual = bus.sync_read("Present_Position", normalize=False)
+        cambios = []
+        for nombre, valor in actual.items():
+            delta = valor - inicio[nombre]
+            if abs(delta) >= 25:
+                cambios.append(f"ID {bus.motors[nombre].id} {nombre}: {delta:+d}")
+        print(" | ".join(cambios) if cambios else "En posición de referencia", flush=True)
+        time.sleep(0.4)
+
+except KeyboardInterrupt:
+    pass
+finally:
+    bus.disconnect(False)
+PY
+
+
+8. USO DE UN VLA SIN ENTRENAR
+
+lerobot-rollout \
+  --strategy.type=base \
+  --policy.path=lerobot/MolmoAct2-SO100_101-LeRobot \
+  --policy.device=cuda \
+  --policy.dtype=bfloat16 \
+  --policy.inference_action_mode=continuous \
+  --robot.type=so101_follower \
+  --robot.port=/dev/ttyACM3 \
+  --robot.id=follower_2 \
+  --robot.cameras='{
+    cam0: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30},
+    cam1: {type: opencv, index_or_path: 2, width: 640, height: 480, fps: 30}
+  }' \
+  --task="Pick up the blue tape" \
+  --duration=10 \
+  --display_data=true
+  
+  
+  
+  
+  lerobot-rollout \
+  --strategy.type=base \
+  --policy.path=twanghcmut/SmolVLA-SO101-LeftArm-Multitask \
+  --policy.device=cuda \
+  --robot.type=so101_follower \
+  --robot.port=/dev/ttyACM0 \
+  --robot.id=follower_3 \
+  --robot.cameras='{
+    top: {type: opencv, index_or_path: 0, width: 640, height: 360, fps: 30},
+    wrist: {type: opencv, index_or_path: 2, width: 640, height: 480, fps: 30}
+  }' \
+  --rename_map='{"observation.images.top":"observation.images.camera1","observation.images.wrist":"observation.images.camera2"}' \
+  --fps=30 \
+  --task="Reach the cup" \
+  --duration=10 \
+  --display_data=true
+  
+  //JUST ONE CAMERA: ////--policy.path=lerobot/smolvla_base \
+  lerobot-rollout \
+  --strategy.type=base \
+  --policy.path=twanghcmut/SmolVLA-SO101-LeftArm-Multitask \
+  --policy.device=cuda \
+  --policy.empty_cameras=2 \
+  --robot.type=so101_follower \
+  --robot.port=/dev/ttyACM0 \
+  --robot.id=follower_3 \
+  --robot.cameras='{top: {type: opencv, index_or_path: 0, width: 640, height: 360, fps: 30}}' \
+  --rename_map='{"observation.images.top":"observation.images.camera1"}' \
+  --fps=30 \
+  --task="Pick up the cup." \
+  --duration=30 \
+  --display_data=true
